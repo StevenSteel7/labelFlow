@@ -1,0 +1,73 @@
+# pyproject.toml
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "labelflow"               # Package name (lowercase is typical)
+version = "0.8.12"               # Pulled from your previous __version__
+authors = [
+  { name="Mr. Steven Moses", email="soggsteven92@mgmail.com" }, 
+]
+description = "A desktop application for image annotation with AI-assisted tools."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file="LICENSE" }     # Make sure to add a LICENSE file
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License", # CHANGE AS NEEDED
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: X11 Applications :: Qt",
+]
+keywords = ["image annotation", "segmentation", "yolo", "sam", "pyqt5", "computer vision", "labelflow"] # Added new keyword
+
+# --- DEPENDENCIES ---
+# WARNING: PyTorch (torch, torchvision, torchaudio) is NOT listed here.
+#          It MUST be installed manually by the user *before* installing this package,
+#          using the appropriate command from pytorch.org (with --index-url if needed).
+#          Update your README.md with these instructions.
+#
+# WARNING: Please verify the exact versions below on PyPI (pypi.org).
+#          Some versions provided (tifffile, ultralytics, plotly) might be typos
+#          or non-existent/unstable releases.
+dependencies = [
+    "PyQt5>=5.15",
+    "tifffile == 2025.3.30",    # WARNING: Future date, likely a typo! Verify.
+    "czifile == 2019.7.2.1",
+    "ultralytics == 8.3.111",  # WARNING: Verify this specific version exists.
+    "plotly == 6.0.1",        # WARNING: Verify this specific version exists.
+    "shapely == 2.1.0",
+    "pystackreg == 0.2.8",
+    "pydicom == 3.0.1",
+    "Pillow == 11.2.1",
+    "scikit-image == 0.25.2",
+    "numpy>=1.21.0",
+    "opencv-python>=4.6.0",
+    "PyYAML>=6.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/your_username/labelflow" # <<< UPDATE URL
+"Bug Tracker" = "https://github.com/your_username/labelflow/issues" # <<< UPDATE URL
+
+[project.scripts]
+# Creates the command 'labelflow' to run your app
+labelflow = "labelflow.main:main" # Assumes your package dir is 'labelflow'
+
+# --- Tool specific configurations ---
+[tool.setuptools.packages.find]
+where = ["src"]  # Look for packages in the 'src' directory
+
+[tool.setuptools.package-data]
+labelflow = [] # Include all data files in the 'labelflow' package
