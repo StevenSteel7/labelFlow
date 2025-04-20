@@ -107,16 +107,10 @@ Bash
 IGNORE_WHEN_COPYING_END
 Usage
 
-After successful installation, activate your virtual environment (if you used one) and run the application from your terminal:
+After successful installation, activate your virtual environment (if you used one) and run the application from your terminal:  
 
 labelflow
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-Bash
-IGNORE_WHEN_COPYING_END
-License
+
 
 Author
 Mr. Steven Moses
