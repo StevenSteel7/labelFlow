@@ -1,13 +1,3 @@
-Okay, here is a template for your README.md file, incorporating the installation instructions for labelFlow, including the critical PyTorch prerequisite.
-
-Remember to:
-
-Replace placeholders like [Your License Name] and add more details about the features if you wish.
-
-Ensure the GitHub URLs in the pyproject.toml file are correct.
-
-Add a LICENSE file to your repository.
-
 # labelFlow
 
 A comprehensive desktop application built with PyQt5 for image annotation, featuring manual and AI-assisted tools (SAM, YOLO), support for various image formats (including multi-slice scientific formats), project management, and dataset utilities.
@@ -119,24 +109,3 @@ Usage
 
 After successful installation, activate your virtual environment (if you used one) and run the application from your terminal:
 
-labelflow
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-Bash
-IGNORE_WHEN_COPYING_END
-License
-
-This project is licensed under the [Your License Name] License - see the LICENSE file for details. (Please add a LICENSE file and specify the license name here, e.g., MIT License)
-
-Author
-
-Mr. Steven Moses
-
-Save this content as `README.md` in the root of your `labelFlow` project directory on GitHub.
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-IGNORE_WHEN_COPYING_END
