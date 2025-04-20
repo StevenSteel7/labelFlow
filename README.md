@@ -118,15 +118,7 @@ Bash
 IGNORE_WHEN_COPYING_END
 License
 
-This project is licensed under the [Your License Name] License - see the LICENSE file for details. (Please add a LICENSE file and specify the license name here, e.g., MIT License)
-
 Author
-
 Mr. Steven Moses
 
-Save this content as `README.md` in the root of your `labelFlow` project directory on GitHub.
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-IGNORE_WHEN_COPYING_END
+
