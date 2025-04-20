@@ -82,33 +82,11 @@ uv pip install git+https://github.com/StevenSteel7/labelFlow.git
 pip install git+https://github.com/StevenSteel7/labelFlow.git
 
 
-This command will download the code and install labelFlow along with its other dependencies (PyQt5, Ultralytics, tifffile, etc.) listed in pyproject.toml.
+This command will download the code and install labelFlow along with its other dependencies (PyQt5, Ultralytics, tifffile, etc.) listed in pyproject.toml.  
 
-# To run:
-just type -> **labelflow**
+After successful installation, activate your virtual environment (if you used one) and run the application from your terminal just type:  
 
-
-(Alternative for Development): If you have cloned the repository (git clone https://github.com/StevenSteel7/labelFlow.git), you can install it in editable mode from the project's root directory:
-
-# Navigate to the cloned directory first
-cd labelFlow
-
-# Using uv
-uv pip install -e .
-
-# Using pip
-pip install -e .
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-Bash
-IGNORE_WHEN_COPYING_END
-Usage
-
-After successful installation, activate your virtual environment (if you used one) and run the application from your terminal:  
-
-labelflow
+**labelflow**
 
 
 Author
