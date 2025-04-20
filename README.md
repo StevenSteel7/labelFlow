@@ -108,6 +108,7 @@ IGNORE_WHEN_COPYING_END
 Usage
 
 After successful installation, activate your virtual environment (if you used one) and run the application from your terminal:
+
 labelflow
 IGNORE_WHEN_COPYING_START
 content_copy
