@@ -42,7 +42,7 @@ keywords = ["image annotation", "segmentation", "yolo", "sam", "pyqt5", "compute
 #          Some versions provided (tifffile, ultralytics, plotly) might be typos
 #          or non-existent/unstable releases.
 dependencies = [
-    "PyQt5>=6.9.0",
+    "PyQt6>=6.9.0",
     "tifffile == 2025.3.30",    # WARNING: Future date, likely a typo! Verify.
     "czifile == 2019.7.2.1",
     "ultralytics == 8.3.111",  # WARNING: Verify this specific version exists.
@@ -58,8 +58,8 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/your_username/labelflow" # <<< UPDATE URL
-"Bug Tracker" = "https://github.com/your_username/labelflow/issues" # <<< UPDATE URL
+"Homepage" = "https://github.com/StevenSteel7/labelflow" # <<< UPDATE URL
+"Bug Tracker" = "https://github.com/StevenSteel7/labelflow/issues" # <<< UPDATE URL
 
 [project.scripts]
 # Creates the command 'labelflow' to run your app
