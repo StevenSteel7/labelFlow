@@ -1,515 +1,487 @@
-#stack_interpolator.py
+# stack_interpolator.py (Migrated to PyQt6)
 import os
 import numpy as np
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, 
+import traceback # For detailed error logging
+
+# PyQt6 Imports
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
                             QLabel, QComboBox, QMessageBox, QProgressDialog, QRadioButton,
-                            QButtonGroup, QGroupBox, QDoubleSpinBox, QApplication)
-from PyQt5.QtCore import Qt
+                            QButtonGroup, QGroupBox, QDoubleSpinBox, QApplication, QGridLayout) # Added QGridLayout
+from PyQt6.QtCore import Qt
+
+# External Libraries
 from scipy.interpolate import RegularGridInterpolator
-from skimage import io
-import tifffile
+from skimage import io # Requires scikit-image
+import tifffile # Requires tifffile
+
+# Custom Exception for user cancellation
+class InterruptedError(Exception):
+    pass
 
 class StackInterpolator(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Stack Interpolator")
-        self.setGeometry(100, 100, 600, 400)
-        self.setWindowFlags(self.windowFlags() | Qt.Window)
-        self.setWindowModality(Qt.ApplicationModal)  # Added window modality
-        
+        self.setWindowTitle("Stack Interpolator Tool")
+        self.setGeometry(100, 100, 600, 550) # Adjusted height
+        # Use PyQt6 enums
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
         # Initialize variables
         self.input_path = ""
         self.output_directory = ""
-        
+
         self.initUI()
 
     def initUI(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(10)  # Add consistent spacing
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
 
-        # Input selection
-        input_group = QGroupBox("Input Selection")
+        # --- Input Selection ---
+        input_group = QGroupBox("Input Source")
         input_layout = QVBoxLayout()
-        
-        # Radio buttons for input type
-        self.dir_radio = QRadioButton("Directory of Image Files")
-        self.stack_radio = QRadioButton("TIFF Stack")
-        
-        input_group_buttons = QButtonGroup(self)
-        input_group_buttons.addButton(self.dir_radio)
-        input_group_buttons.addButton(self.stack_radio)
-        
+        input_layout.setSpacing(5)
+
+        self.dir_radio = QRadioButton("Directory of Image Files (Sorted Numerically)")
+        self.stack_radio = QRadioButton("Multi-Page TIFF Stack")
+        self.input_type_group = QButtonGroup(self)
+        self.input_type_group.addButton(self.dir_radio)
+        self.input_type_group.addButton(self.stack_radio)
+        self.dir_radio.setChecked(True)
         input_layout.addWidget(self.dir_radio)
         input_layout.addWidget(self.stack_radio)
-        self.dir_radio.setChecked(True)
-        
+
+        file_select_layout = QHBoxLayout()
+        self.input_label = QLabel("Input: Not selected")
+        self.input_label.setWordWrap(True)
+        self.select_input_btn = QPushButton("Select...")
+        self.select_input_btn.setToolTip("Select input directory or TIFF stack file")
+        self.select_input_btn.clicked.connect(self.select_input)
+        file_select_layout.addWidget(self.input_label, 1)
+        file_select_layout.addWidget(self.select_input_btn)
+        input_layout.addLayout(file_select_layout)
+
         input_group.setLayout(input_layout)
         layout.addWidget(input_group)
 
-        # Interpolation method
+        # --- Interpolation Method ---
         method_group = QGroupBox("Interpolation Settings")
-        method_layout = QVBoxLayout()
-        
-        method_combo_layout = QHBoxLayout()
-        method_combo_layout.addWidget(QLabel("Method:"))
+        method_layout = QHBoxLayout() # Horizontal layout for label and combo
+
+        method_layout.addWidget(QLabel("Method:"))
         self.method_combo = QComboBox()
         self.method_combo.addItems([
-            "linear",
-            "nearest",
-            "slinear",
-            "cubic",
-            "quintic",
-            "pchip"
+            "linear",    # Good balance
+            "nearest",   # Fastest, preserves edges, blocky
+            # "slinear", # Not directly supported by RegularGridInterpolator
+            "cubic",     # Smoother, slower (requires hybrid approach)
+            "quintic",   # Smoothest, slowest (requires hybrid approach)
+            # "pchip"    # Shape-preserving (requires hybrid approach)
         ])
-        method_combo_layout.addWidget(self.method_combo)
-        method_layout.addLayout(method_combo_layout)
-        
+        self.method_combo.setToolTip("Interpolation algorithm to use.\n"
+                                     "'linear' and 'nearest' are faster.\n"
+                                     "'cubic' and 'quintic' are smoother but much slower.")
+        self.method_combo.setCurrentText("linear") # Default to linear
+        method_layout.addWidget(self.method_combo, 1) # Allow combo to stretch
         method_group.setLayout(method_layout)
         layout.addWidget(method_group)
 
-        # Original dimensions group
-        orig_group = QGroupBox("Original Dimensions")
-        orig_layout = QVBoxLayout()
-        
-        orig_xy_layout = QHBoxLayout()
-        orig_xy_layout.addWidget(QLabel("XY Pixel Size:"))
+        # --- Dimensions & Spacing ---
+        dims_group = QGroupBox("Dimensions & Spacing")
+        dims_layout = QGridLayout()
+        dims_layout.setSpacing(8)
+
+        dims_layout.addWidget(QLabel("Original XY Size:"), 0, 0)
         self.orig_xy_size = QDoubleSpinBox()
-        self.orig_xy_size.setRange(0.001, 1000.0)
+        self.orig_xy_size.setRange(0.000001, 10000.0)
         self.orig_xy_size.setValue(1.0)
-        self.orig_xy_size.setDecimals(3)
-        orig_xy_layout.addWidget(self.orig_xy_size)
-        
-        orig_z_layout = QHBoxLayout()
-        orig_z_layout.addWidget(QLabel("Z Spacing:"))
+        self.orig_xy_size.setDecimals(6)
+        self.orig_xy_size.setToolTip("Original pixel size in XY plane.")
+        dims_layout.addWidget(self.orig_xy_size, 0, 1)
+
+        dims_layout.addWidget(QLabel("Original Z Spacing:"), 1, 0)
         self.orig_z_size = QDoubleSpinBox()
-        self.orig_z_size.setRange(0.001, 1000.0)
+        self.orig_z_size.setRange(0.000001, 10000.0)
         self.orig_z_size.setValue(1.0)
-        self.orig_z_size.setDecimals(3)
-        orig_z_layout.addWidget(self.orig_z_size)
-        
-        orig_layout.addLayout(orig_xy_layout)
-        orig_layout.addLayout(orig_z_layout)
-        orig_group.setLayout(orig_layout)
-        layout.addWidget(orig_group)
+        self.orig_z_size.setDecimals(6)
+        self.orig_z_size.setToolTip("Original distance between slices.")
+        dims_layout.addWidget(self.orig_z_size, 1, 1)
 
-        # New dimensions group
-        new_group = QGroupBox("New Dimensions")
-        new_layout = QVBoxLayout()
-        
-        new_xy_layout = QHBoxLayout()
-        new_xy_layout.addWidget(QLabel("XY Pixel Size:"))
+        dims_layout.addWidget(QLabel("New XY Size:"), 0, 2)
         self.new_xy_size = QDoubleSpinBox()
-        self.new_xy_size.setRange(0.001, 1000.0)
+        self.new_xy_size.setRange(0.000001, 10000.0)
         self.new_xy_size.setValue(1.0)
-        self.new_xy_size.setDecimals(3)
-        new_xy_layout.addWidget(self.new_xy_size)
-        
-        new_z_layout = QHBoxLayout()
-        new_z_layout.addWidget(QLabel("Z Spacing:"))
-        self.new_z_size = QDoubleSpinBox()
-        self.new_z_size.setRange(0.001, 1000.0)
-        self.new_z_size.setValue(1.0)
-        self.new_z_size.setDecimals(3)
-        new_z_layout.addWidget(self.new_z_size)
-        
-        new_layout.addLayout(new_xy_layout)
-        new_layout.addLayout(new_z_layout)
-        new_group.setLayout(new_layout)
-        layout.addWidget(new_group)
+        self.new_xy_size.setDecimals(6)
+        self.new_xy_size.setToolTip("Desired output pixel size in XY plane.")
+        dims_layout.addWidget(self.new_xy_size, 0, 3)
 
-        # Units selector
-        unit_group = QGroupBox("Unit Settings")
-        unit_layout = QHBoxLayout()
-        unit_layout.addWidget(QLabel("Unit:"))
+        dims_layout.addWidget(QLabel("New Z Spacing:"), 1, 2)
+        self.new_z_size = QDoubleSpinBox()
+        self.new_z_size.setRange(0.000001, 10000.0)
+        self.new_z_size.setValue(1.0)
+        self.new_z_size.setDecimals(6)
+        self.new_z_size.setToolTip("Desired output distance between slices.")
+        dims_layout.addWidget(self.new_z_size, 1, 3)
+
+        dims_layout.addWidget(QLabel("Unit:"), 2, 0)
         self.size_unit = QComboBox()
         self.size_unit.addItems(["nm", "µm", "mm"])
         self.size_unit.setCurrentText("µm")
-        unit_layout.addWidget(self.size_unit)
-        unit_group.setLayout(unit_layout)
-        layout.addWidget(unit_group)
+        self.size_unit.setToolTip("Unit for all size and spacing values.")
+        dims_layout.addWidget(self.size_unit, 2, 1)
 
-        # Input/Output buttons
-        button_group = QGroupBox("File Selection")
-        button_layout = QVBoxLayout()
-        
-        # Input selection
-        input_file_layout = QHBoxLayout()
-        self.input_label = QLabel("No input selected")
-        self.select_input_btn = QPushButton("Select Input")
-        self.select_input_btn.clicked.connect(self.select_input)
-        input_file_layout.addWidget(self.select_input_btn)
-        input_file_layout.addWidget(self.input_label)
-        button_layout.addLayout(input_file_layout)
-        
-        # Output selection
-        output_file_layout = QHBoxLayout()
-        self.output_label = QLabel("No output directory selected")
-        self.select_output_btn = QPushButton("Select Output Directory")
+        dims_group.setLayout(dims_layout)
+        layout.addWidget(dims_group)
+
+
+        # --- Output Selection ---
+        output_group = QGroupBox("Output Location")
+        output_layout = QHBoxLayout()
+        self.output_label = QLabel("Output Directory: Not selected")
+        self.output_label.setWordWrap(True)
+        self.select_output_btn = QPushButton("Select...")
+        self.select_output_btn.setToolTip("Select directory to save the interpolated stack")
         self.select_output_btn.clicked.connect(self.select_output)
-        output_file_layout.addWidget(self.select_output_btn)
-        output_file_layout.addWidget(self.output_label)
-        button_layout.addLayout(output_file_layout)
-        
-        button_group.setLayout(button_layout)
-        layout.addWidget(button_group)
+        output_layout.addWidget(self.output_label, 1)
+        output_layout.addWidget(self.select_output_btn)
+        output_group.setLayout(output_layout)
+        layout.addWidget(output_group)
 
-        # Interpolate button
-        self.interpolate_btn = QPushButton("Interpolate")
+        # --- Action Button & Progress ---
+        self.interpolate_btn = QPushButton("Interpolate Stack")
         self.interpolate_btn.clicked.connect(self.interpolate_stack)
         layout.addWidget(self.interpolate_btn)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Idle") # Initial text
+        layout.addWidget(self.progress_bar)
 
         self.setLayout(layout)
 
     def select_input(self):
+        """Selects input directory or TIFF stack file."""
         try:
             if self.dir_radio.isChecked():
                 path = QFileDialog.getExistingDirectory(
-                    self,
-                    "Select Directory with Images",
-                    "",
-                    QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+                    self, "Select Directory with Images", ""
                 )
-            else:
+                dialog_title = "Select Directory"
+            else: # Stack file
                 path, _ = QFileDialog.getOpenFileName(
-                    self,
-                    "Select TIFF Stack",
-                    "",
-                    "TIFF Files (*.tif *.tiff)",
-                    options=QFileDialog.Options()
+                    self, "Select TIFF Stack File", "", "TIFF Files (*.tif *.tiff)"
                 )
-            
+                dialog_title = "Select TIFF Stack"
+
             if path:
                 self.input_path = path
-                self.input_label.setText(f"Selected: {os.path.basename(path)}")
+                self.input_label.setText(f"Input: ...{os.sep}{os.path.basename(path)}")
                 self.input_label.setToolTip(path)
                 QApplication.processEvents()
-                
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error selecting input: {str(e)}")
 
     def select_output(self):
+        """Selects the output directory."""
         try:
             directory = QFileDialog.getExistingDirectory(
-                self,
-                "Select Output Directory",
-                "",
-                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+                self, "Select Output Directory", ""
             )
-            
             if directory:
                 self.output_directory = directory
-                self.output_label.setText(f"Selected: {os.path.basename(directory)}")
+                self.output_label.setText(f"Output: ...{os.sep}{os.path.basename(directory)}")
                 self.output_label.setToolTip(directory)
                 QApplication.processEvents()
-                
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error selecting output directory: {str(e)}")
 
-    def load_images(self):
+    def load_images(self, progress_dialog):
+        """Loads images from directory or stack file, handling potential errors."""
+        print("Starting image loading...")
         try:
-            progress = QProgressDialog("Loading images...", "Cancel", 0, 100, self)
-            progress.setWindowModality(Qt.WindowModal)
-            progress.show()
-            QApplication.processEvents()
-    
             if self.stack_radio.isChecked():
-                progress.setLabelText("Loading TIFF stack...")
-                progress.setValue(20)
+                progress_dialog.setLabelText("Loading TIFF stack...")
                 QApplication.processEvents()
-                
-                # Load stack preserving original dtype
                 stack = io.imread(self.input_path)
-                print(f"Loaded stack dtype: {stack.dtype}")
-                print(f"Value range: [{stack.min()}, {stack.max()}]")
-                
-                progress.setValue(90)
-                QApplication.processEvents()
+                if stack.ndim < 3: raise ValueError("Selected TIFF is not a multi-page stack.")
+                print(f"Loaded TIFF stack shape: {stack.shape}, dtype: {stack.dtype}")
                 return stack
-            else:
+            else: # Directory of images
+                progress_dialog.setLabelText("Loading images from directory...")
+                QApplication.processEvents()
                 valid_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')
-                files = sorted([f for f in os.listdir(self.input_path) 
-                              if f.lower().endswith(valid_extensions)])
-                
-                if not files:
-                    raise ValueError("No valid image files found in directory")
-    
-                progress.setMaximum(len(files))
-                
-                # Load first image to get dimensions and dtype
-                first_img = io.imread(os.path.join(self.input_path, files[0]))
-                stack = np.zeros((len(files), *first_img.shape), dtype=first_img.dtype)
+                # Sort files naturally if possible
+                try:
+                    import natsort
+                    files = natsort.natsorted([f for f in os.listdir(self.input_path)
+                                             if f.lower().endswith(valid_extensions)])
+                    print("Using natural sorting for files.")
+                except ImportError:
+                    files = sorted([f for f in os.listdir(self.input_path)
+                                  if f.lower().endswith(valid_extensions)])
+                    print("Warning: 'natsort' package not found. Using simple alphabetical sorting.")
+
+                if not files: raise ValueError("No valid image files found in directory.")
+
+                progress_dialog.setMaximum(len(files))
+                progress_dialog.setValue(0)
+
+                # Load first image to get shape and dtype
+                first_path = os.path.join(self.input_path, files[0])
+                first_img = io.imread(first_path)
+                ref_shape = first_img.shape
+                ref_dtype = first_img.dtype
+                print(f"Reference image '{files[0]}': shape={ref_shape}, dtype={ref_dtype}")
+
+                # Initialize stack
+                stack = np.zeros((len(files), *ref_shape), dtype=ref_dtype)
                 stack[0] = first_img
-                
-                print(f"Created stack with dtype: {stack.dtype}")
-                print(f"First image range: [{first_img.min()}, {first_img.max()}]")
-    
+
                 # Load remaining images
                 for i, fname in enumerate(files[1:], 1):
-                    progress.setValue(i)
-                    progress.setLabelText(f"Loading image {i+1}/{len(files)}")
+                    if progress_dialog.wasCanceled(): raise InterruptedError("Loading cancelled")
+                    progress_dialog.setValue(i)
+                    progress_dialog.setLabelText(f"Loading image {i+1}/{len(files)}: {fname}")
                     QApplication.processEvents()
-                    
-                    if progress.wasCanceled():
-                        raise InterruptedError("Loading cancelled by user")
-                    
-                    img = io.imread(os.path.join(self.input_path, fname))
-                    if img.shape != first_img.shape:
-                        raise ValueError(f"Image {fname} has different dimensions from the first image")
-                    if img.dtype != first_img.dtype:
-                        raise ValueError(f"Image {fname} has different bit depth from the first image")
+
+                    img_path = os.path.join(self.input_path, fname)
+                    img = io.imread(img_path)
+                    if img.shape != ref_shape:
+                        raise ValueError(f"Image '{fname}' shape {img.shape} differs from first image {ref_shape}.")
+                    if img.dtype != ref_dtype:
+                         print(f"Warning: Image '{fname}' dtype {img.dtype} differs from first image {ref_dtype}. Attempting conversion.")
+                         try: img = img.astype(ref_dtype)
+                         except (ValueError, TypeError) as conv_err: raise ValueError(f"Cannot convert {fname} to {ref_dtype}: {conv_err}")
                     stack[i] = img
-    
+
+                print(f"Loaded stack from directory: shape={stack.shape}, dtype={stack.dtype}")
                 return stack
-                
+
         except Exception as e:
-            raise ValueError(f"Error loading images: {str(e)}")
-        finally:
-            progress.close()
-            QApplication.processEvents()
-    
+            print(f"Error during image loading: {e}")
+            traceback.print_exc()
+            raise ValueError(f"Error loading images: {str(e)}") # Re-raise with generic message
+
     def interpolate_stack(self):
+        """Performs the stack interpolation based on UI settings."""
         if not self.input_path or not self.output_directory:
-            QMessageBox.warning(self, "Missing Paths", "Please select both input and output paths")
+            QMessageBox.warning(self, "Missing Paths", "Please select both input path and output directory.")
             return
-            
+        if self.orig_xy_size.value() <= 0 or self.orig_z_size.value() <= 0 or \
+           self.new_xy_size.value() <= 0 or self.new_z_size.value() <= 0:
+           QMessageBox.warning(self, "Invalid Spacing", "Pixel sizes and Z spacing must be positive.")
+           return
+
+        progress = None
         try:
-            # Create progress dialog
-            progress = QProgressDialog("Processing...", "Cancel", 0, 100, self)
-            progress.setWindowModality(Qt.WindowModal)
+            # --- Setup ---
+            progress = QProgressDialog("Initializing...", "Cancel", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal) # Use enum
             progress.setWindowTitle("Interpolation Progress")
-            progress.setMinimumDuration(0)
+            progress.setMinimumDuration(0) # Show immediately
             progress.setMinimumWidth(400)
+            progress.setValue(0)
             progress.show()
             QApplication.processEvents()
-    
-            # Load images
-            progress.setLabelText("Loading images...")
-            progress.setValue(10)
-            QApplication.processEvents()
-            
-            input_stack = self.load_images()
+
+            # --- Load Images ---
+            input_stack = self.load_images(progress) # Pass progress dialog
+            if input_stack.ndim != 3: # Expecting ZYX
+                 raise ValueError(f"Input stack must be 3-dimensional (Z, Y, X). Got shape {input_stack.shape}")
+
             original_dtype = input_stack.dtype
-            type_range = np.iinfo(original_dtype) if np.issubdtype(original_dtype, np.integer) else None
-            
-            print(f"Original data type: {original_dtype}")
-            print(f"Original shape: {input_stack.shape}")
-            print(f"Original range: {input_stack.min()} - {input_stack.max()}")
-            
-            # Normalize input data to float64 for interpolation
-            input_stack_normalized = input_stack.astype(np.float64)
-            if type_range is not None:
-                input_stack_normalized = input_stack_normalized / type_range.max
-            
-            progress.setLabelText("Calculating dimensions...")
+            print(f"Original stack: dtype={original_dtype}, shape={input_stack.shape}, range=[{np.min(input_stack)}, {np.max(input_stack)}]")
+
+            # --- Prepare Coordinates and Interpolator ---
+            progress.setLabelText("Preparing interpolation grid...")
             progress.setValue(20)
             QApplication.processEvents()
-    
-            # Calculate dimensions and coordinates
-            z_old = np.arange(input_stack.shape[0]) * self.orig_z_size.value()
-            y_old = np.arange(input_stack.shape[1]) * self.orig_xy_size.value()
-            x_old = np.arange(input_stack.shape[2]) * self.orig_xy_size.value()
-    
-            z_new = np.arange(z_old[0], z_old[-1] + self.new_z_size.value(), self.new_z_size.value())
-            y_new = np.arange(0, input_stack.shape[1] * self.orig_xy_size.value(), self.new_xy_size.value())
-            x_new = np.arange(0, input_stack.shape[2] * self.orig_xy_size.value(), self.new_xy_size.value())
-    
-            y_new = y_new[y_new < y_old[-1] + self.new_xy_size.value()]
-            x_new = x_new[x_new < x_old[-1] + self.new_xy_size.value()]
-    
-            new_shape = (len(z_new), len(y_new), len(x_new))
+
+            # Original coordinates based on original spacing
+            z_orig_coords = np.arange(input_stack.shape[0]) * self.orig_z_size.value()
+            y_orig_coords = np.arange(input_stack.shape[1]) * self.orig_xy_size.value()
+            x_orig_coords = np.arange(input_stack.shape[2]) * self.orig_xy_size.value()
+
+            # New coordinates based on new spacing, covering the same *spatial* range
+            # Add a small epsilon to ensure the last original point is included in the range
+            epsilon = 1e-6 * max(self.new_z_size.value(), self.new_xy_size.value())
+            z_new_coords = np.arange(z_orig_coords[0], z_orig_coords[-1] + epsilon, self.new_z_size.value())
+            y_new_coords = np.arange(y_orig_coords[0], y_orig_coords[-1] + epsilon, self.new_xy_size.value())
+            x_new_coords = np.arange(x_orig_coords[0], x_orig_coords[-1] + epsilon, self.new_xy_size.value())
+
+            new_shape = (len(z_new_coords), len(y_new_coords), len(x_new_coords))
+            if np.prod(new_shape) == 0: raise ValueError("New dimensions result in zero size.")
+            print(f"Original grid covers Z: [{z_orig_coords[0]}, {z_orig_coords[-1]}], Y: [{y_orig_coords[0]}, {y_orig_coords[-1]}], X: [{x_orig_coords[0]}, {x_orig_coords[-1]}]")
+            print(f"New grid covers Z: [{z_new_coords[0]}, {z_new_coords[-1]}], Y: [{y_new_coords[0]}, {y_new_coords[-1]}], X: [{x_new_coords[0]}, {x_new_coords[-1]}]")
             print(f"New dimensions will be: {new_shape}")
-    
-            # Initialize output array
-            interpolated_data = np.zeros(new_shape, dtype=np.float64)
-            
-            method = self.method_combo.currentText()
-            
-            # For higher-order methods, use a hybrid approach
-            if method in ['cubic', 'quintic', 'pchip']:
-                progress.setLabelText("Using hybrid interpolation approach...")
-                progress.setValue(30)
-                QApplication.processEvents()
-                
-                from scipy.interpolate import interp1d
-                
-                # Process each XY point
-                total_points = input_stack.shape[1] * input_stack.shape[2]
-                points_processed = 0
-                
-                temp_stack = np.zeros((len(z_new), input_stack.shape[1], input_stack.shape[2]), dtype=np.float64)
-                
-                for y in range(input_stack.shape[1]):
-                    for x in range(input_stack.shape[2]):
-                        if progress.wasCanceled():
-                            return
-                        
-                        points_processed += 1
-                        if points_processed % 1000 == 0:
-                            progress_val = 30 + (points_processed / total_points * 30)
-                            progress.setValue(int(progress_val))
-                            progress.setLabelText(f"Interpolating Z dimension: {points_processed}/{total_points} points")
-                            QApplication.processEvents()
-                        
-                        z_profile = input_stack_normalized[:, y, x]
-                        f = interp1d(z_old, z_profile, kind=method, bounds_error=False, fill_value='extrapolate')
-                        temp_stack[:, y, x] = f(z_new)
-                
-                progress.setLabelText("Interpolating XY planes...")
-                progress.setValue(60)
-                QApplication.processEvents()
-                
-                for z in range(len(z_new)):
-                    if progress.wasCanceled():
-                        return
-                    
-                    progress.setValue(60 + int((z / len(z_new)) * 30))
-                    progress.setLabelText(f"Processing XY plane {z+1}/{len(z_new)}")
-                    QApplication.processEvents()
-                    
-                    interpolator = RegularGridInterpolator(
-                        (y_old, x_old),
-                        temp_stack[z],
-                        method='linear',
-                        bounds_error=False,
-                        fill_value=0
-                    )
-                    
-                    yy, xx = np.meshgrid(y_new, x_new, indexing='ij')
-                    pts = np.stack([yy.ravel(), xx.ravel()], axis=-1)
-                    
-                    interpolated_data[z] = interpolator(pts).reshape(len(y_new), len(x_new))
-                
-                del temp_stack
-                
-            else:  # For linear and nearest neighbor
-                progress.setLabelText("Creating interpolator...")
-                progress.setValue(30)
-                QApplication.processEvents()
-                
-                interpolator = RegularGridInterpolator(
-                    (z_old, y_old, x_old),
-                    input_stack_normalized,
-                    method=method,
-                    bounds_error=False,
-                    fill_value=0
-                )
-                
-                slices_per_batch = max(1, len(z_new) // 20)
-                total_batches = (len(z_new) + slices_per_batch - 1) // slices_per_batch
-                
-                for batch_idx in range(total_batches):
-                    if progress.wasCanceled():
-                        return
-                    
-                    start_idx = batch_idx * slices_per_batch
-                    end_idx = min((batch_idx + 1) * slices_per_batch, len(z_new))
-                    
-                    progress.setLabelText(f"Interpolating batch {batch_idx + 1}/{total_batches}")
-                    progress_value = int(40 + (batch_idx/total_batches)*40)
-                    progress.setValue(progress_value)
-                    QApplication.processEvents()
-                    
-                    zz, yy, xx = np.meshgrid(
-                        z_new[start_idx:end_idx],
-                        y_new,
-                        x_new,
-                        indexing='ij'
-                    )
-                    
-                    pts = np.stack([zz.ravel(), yy.ravel(), xx.ravel()], axis=-1)
-                    
-                    interpolated_data[start_idx:end_idx] = interpolator(pts).reshape(
-                        end_idx - start_idx,
-                        len(y_new),
-                        len(x_new)
-                    )
-    
-            # Convert back to original dtype
-            progress.setLabelText("Converting to original bit depth...")
-            progress.setValue(90)
-            QApplication.processEvents()
-    
-            if np.issubdtype(original_dtype, np.integer):
-                # Scale back to original range
-                interpolated_data = np.clip(interpolated_data, 0, 1)
-                interpolated_data = (interpolated_data * type_range.max).astype(original_dtype)
+
+            # Normalize input data to float64 for potentially better interpolation precision
+            input_stack_float = input_stack.astype(np.float64)
+            input_min = np.min(input_stack_float)
+            input_max = np.max(input_stack_float)
+            # Avoid scaling if range is zero
+            input_range = input_max - input_min
+            if input_range > 1e-9: # Use tolerance for float comparison
+                 input_stack_float = (input_stack_float - input_min) / input_range
             else:
-                interpolated_data = interpolated_data.astype(original_dtype)
-    
-            print(f"Final dtype: {interpolated_data.dtype}")
-            print(f"Final range: [{interpolated_data.min()}, {interpolated_data.max()}]")
-    
-            # Save output
+                 print("Warning: Input stack has zero range. Output will be constant.")
+                 input_stack_float.fill(0.0) # Set to 0 if flat
+
+
+            # Choose interpolation method
+            method = self.method_combo.currentText()
+            print(f"Using interpolation method: {method}")
+
+            # --- Perform Interpolation ---
+            progress.setLabelText(f"Interpolating using '{method}' method...")
+            progress.setValue(40)
+            QApplication.processEvents()
+
+            # Create the interpolator function
+            # Use lower-case 'linear' and 'nearest' for scipy
+            scipy_method = method if method in ['linear', 'nearest'] else 'linear' # Default to linear for griddata issues
+            if method not in ['linear', 'nearest']:
+                print(f"Note: Scipy RegularGridInterpolator only directly supports 'linear' and 'nearest'. Using 'linear' for grid interpolation.")
+                # Hybrid approach from previous attempt is very complex and slow, sticking to RegularGridInterpolator limits
+
+            interpolator = RegularGridInterpolator(
+                (z_orig_coords, y_orig_coords, x_orig_coords),
+                input_stack_float, # Use normalized float data
+                method=scipy_method,
+                bounds_error=False, # Don't raise error for points outside original grid
+                fill_value=0 # Fill outside points with background (0 after normalization)
+            )
+
+            # Create the grid of new points to interpolate at
+            # meshgrid creates coordinate matrices matching the *output* shape
+            zz_new, yy_new, xx_new = np.meshgrid(
+                z_new_coords, y_new_coords, x_new_coords, indexing='ij' # 'ij' indexing -> output matches (Z, Y, X) order
+            )
+            # Stack the coordinate matrices into a (N, 3) array where N = Z*Y*X (new)
+            points_to_interpolate = np.stack([zz_new.ravel(), yy_new.ravel(), xx_new.ravel()], axis=-1)
+
+            # Perform interpolation (this can be memory intensive for large outputs)
+            print(f"Interpolating {points_to_interpolate.shape[0]} points...")
+            interpolated_data_flat = interpolator(points_to_interpolate)
+
+            # Reshape the flat result back to the target 3D shape
+            interpolated_data_float = interpolated_data_flat.reshape(new_shape)
+            print(f"Interpolation finished. Result shape: {interpolated_data_float.shape}")
+
+            # --- Convert back to original dtype range ---
+            progress.setLabelText("Converting to original data type...")
+            progress.setValue(80)
+            QApplication.processEvents()
+
+            final_array = interpolated_data_float # Start with float result
+
+            if np.issubdtype(original_dtype, np.integer):
+                print(f"Scaling result back to original dtype ({original_dtype}) range...")
+                type_info = np.iinfo(original_dtype)
+                # Scale normalized [0, 1] result back to original min/max range
+                # If input range was zero, output remains zero (scaled)
+                if input_range > 1e-9:
+                     final_array = final_array * input_range + input_min
+                else: # Handle flat input case
+                     final_array.fill(input_min) # Fill with the original constant value
+
+                # Clip to ensure values are within the target type's bounds before casting
+                final_array = np.clip(final_array, type_info.min, type_info.max)
+                final_array = final_array.astype(original_dtype)
+                print(f"Final integer data range: [{np.min(final_array)}, {np.max(final_array)}]")
+            elif np.issubdtype(original_dtype, np.floating):
+                 # Scale back if needed (or just cast if original was float)
+                 if input_range > 1e-9:
+                     final_array = final_array * input_range + input_min
+                 else:
+                     final_array.fill(input_min)
+                 final_array = final_array.astype(original_dtype)
+                 print(f"Final float data range: [{np.min(final_array)}, {np.max(final_array)}]")
+            else:
+                 print(f"Warning: Unsupported original dtype {original_dtype}. Saving result as float64.")
+                 final_array = final_array.astype(np.float64) # Keep as float64
+
+            # --- Save Output TIFF with Metadata ---
             progress.setLabelText("Saving interpolated stack...")
             progress.setValue(95)
             QApplication.processEvents()
-    
+
+            # Determine output filename
             if self.stack_radio.isChecked():
-                output_name = os.path.splitext(os.path.basename(self.input_path))[0]
+                output_name_base = os.path.splitext(os.path.basename(self.input_path))[0]
             else:
-                output_name = "interpolated_stack"
-    
-            output_path = os.path.join(self.output_directory, f"{output_name}_interpolated.tif")
-    
-            # Convert sizes to micrometers for metadata
+                output_name_base = f"interpolated_{os.path.basename(self.input_path)}"
+            output_filename = f"{output_name_base}_interpolated_{method}.tif" # Include method in name
+            output_path = os.path.join(self.output_directory, output_filename)
+
+            # Get pixel sizes in micrometers for metadata
             unit = self.size_unit.currentText()
-            xy_size = self.new_xy_size.value()
-            z_size = self.new_z_size.value()
-            
-            if unit == "nm":
-                xy_size /= 1000
-                z_size /= 1000
-            elif unit == "mm":
-                xy_size *= 1000
-                z_size *= 1000
-    
-            # Save with metadata
+            xy_size_um = self.new_xy_size.value()
+            z_size_um = self.new_z_size.value()
+            if unit == "nm": xy_size_um /= 1000.0; z_size_um /= 1000.0
+            elif unit == "mm": xy_size_um *= 1000.0; z_size_um *= 1000.0
+
+            # Prepare ImageJ metadata
+            imagej_metadata = {'axes': 'ZYX', 'unit': 'um'}
+            if z_size_um > 0: imagej_metadata['spacing'] = z_size_um
+            resolution_xy = (1.0 / xy_size_um, 1.0 / xy_size_um) if xy_size_um > 0 else (1.0, 1.0)
+            resolution_unit = 'micron'
+
+            print(f"Saving interpolated stack to: {output_path}")
+            print(f"  Metadata: {imagej_metadata}")
+            print(f"  Resolution: {resolution_xy} pixels/{resolution_unit}")
+
+            # Save the stack
             tifffile.imwrite(
                 output_path,
-                interpolated_data,
+                final_array,
                 imagej=True,
-                metadata={
-                    'axes': 'ZYX',
-                    'spacing': z_size,
-                    'unit': 'um',
-                    'finterval': xy_size
-                },
-                resolution=(1.0/xy_size, 1.0/xy_size)
+                metadata=imagej_metadata,
+                resolution=resolution_xy,
+                resolutionunit=resolution_unit
             )
-    
-            progress.setValue(100)
+
+            if progress: progress.setValue(100)
             QApplication.processEvents()
-    
+
             QMessageBox.information(
                 self,
                 "Success",
                 f"Interpolation completed successfully!\n"
-                f"Output saved to:\n{output_path}\n"
-                f"New dimensions: {interpolated_data.shape}\n"
-                f"Bit depth: {interpolated_data.dtype}\n"
-                f"XY Pixel size: {self.new_xy_size.value()} {unit}\n"
-                f"Z Spacing: {self.new_z_size.value()} {unit}"
+                f"Output saved to:\n{output_path}\n\n"
+                f"Original Shape: {input_stack.shape}\n"
+                f"New Shape: {final_array.shape}\n"
+                f"Output Bit Depth: {final_array.dtype}\n"
+                f"Output XY Pixel Size: {self.new_xy_size.value():.4f} {unit}\n"
+                f"Output Z Spacing: {self.new_z_size.value():.4f} {unit}"
             )
-    
-        except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-            print(f"Error occurred: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            progress.close()
-            QApplication.processEvents()
 
+        except InterruptedError:
+             QMessageBox.warning(self, "Cancelled", "Operation cancelled by user.")
+             if progress: progress.setLabelText("Cancelled.")
+        except Exception as e:
+            error_msg = f"An error occurred during interpolation:\n{str(e)}"
+            QMessageBox.critical(self, "Error", error_msg)
+            print(error_msg)
+            traceback.print_exc()
+            if progress: progress.setLabelText("Error occurred.")
+        finally:
+             if progress: progress.close()
+             QApplication.processEvents()
 
     def show_centered(self, parent):
-        parent_geo = parent.geometry()
-        self.move(parent_geo.center() - self.rect().center())
+        """Shows the dialog centered on the parent window."""
+        if parent:
+            parent_geo = parent.geometry()
+            if self.rect().isValid(): # Check if self geometry is valid
+                 self.move(parent_geo.center() - self.rect().center())
         self.show()
-        QApplication.processEvents()  # Ensure UI updates
-        
-        
+        QApplication.processEvents()
+
 # Helper function to create the dialog
 def show_stack_interpolator(parent):
+    """Creates and shows the Stack Interpolator dialog."""
     dialog = StackInterpolator(parent)
     dialog.show_centered(parent)
-    return dialog
+    return dialog # Return instance if needed
